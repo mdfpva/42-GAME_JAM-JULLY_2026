@@ -33,6 +33,7 @@ const MovingPlatformScene := preload("res://scenes/MovingPlatform.tscn")
 
 @onready var player: CharacterBody2D = $Player
 @onready var stats_label: Label = $UI/StatsLabel
+@onready var buff_label: Label = $UI/BuffLabel
 @onready var controls_panel: Control = $UI/ControlsPanel
 @onready var game_over_panel: Control = $UI/GameOverPanel
 @onready var game_over_label: Label = $UI/GameOverPanel/Label
@@ -71,9 +72,18 @@ func _ready() -> void:
 func _process(_delta: float) -> void:
 	if Game.game_over:
 		return
+	_update_buff_label()
 	while next_x < player.global_position.x + AHEAD_BUFFER:
 		_spawn_next_chunk()
 	_despawn_behind(player.global_position.x - BEHIND_DESPAWN)
+
+func _update_buff_label() -> void:
+	if player.active_buff == -1:
+		buff_label.visible = false
+		return
+	buff_label.text = "BUFF: %s (%.1fs)" % [player.BUFF_NAMES[player.active_buff], maxf(player.buff_timer, 0.0)]
+	buff_label.add_theme_color_override("font_color", player.BUFF_COLORS[player.active_buff])
+	buff_label.visible = true
 
 func _spawn_start_platform() -> void:
 	var width := 500.0

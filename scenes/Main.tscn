@@ -20,6 +20,17 @@ theme_override_colors/font_color = Color(0, 0, 0, 1)
 theme_override_font_sizes/font_size = 26
 text = "Distância: 0m   Moedas: 0   Inimigos: 0"
 
+[node name="BuffLabel" type="Label" parent="UI"]
+visible = false
+offset_left = 20.0
+offset_top = 58.0
+offset_right = 600.0
+offset_bottom = 92.0
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+theme_override_constants/outline_size = 5
+theme_override_font_sizes/font_size = 24
+
 [node name="HighscoreBanner" type="Label" parent="UI"]
 visible = false
 offset_left = 226.0
@@ -69,6 +80,12 @@ C - Limpar Tabela de Recordes
 
 Mapa infinito! Apanha moedas,
 mata inimigos e vê até onde consegues chegar.
+
+A cada 10 inimigos mortos ganhas um
+buff aleatório temporário: voo livre,
+toque fatal, escudo, íman de moedas,
+tiro rápido, super salto, câmara lenta,
+velocidade dupla, moedas ou kills a dobrar!
 
 Os teus melhores resultados ficam
 guardados numa tabela de recordes."

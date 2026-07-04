@@ -3,6 +3,7 @@ extends Node
 signal stats_changed
 signal died
 signal new_highscore_reached
+signal kill_buff_earned
 
 const START_X := 100.0
 const SAVE_PATH := "user://scores.json"
@@ -12,6 +13,9 @@ var distance := 0
 var coins := 0
 var kills := 0
 var game_over := false
+var coin_multiplier := 1
+var kill_multiplier := 1
+var world_speed_scale := 1.0
 var scores: Array = []
 var is_new_highscore := false
 var previous_best := 0
@@ -21,12 +25,18 @@ func _ready() -> void:
 	_load_scores()
 
 func add_coin() -> void:
-	coins += 1
+	coins += coin_multiplier
 	stats_changed.emit()
 
 func add_kill() -> void:
-	kills += 1
+	var previous := kills
+	kills += kill_multiplier
 	stats_changed.emit()
+	# Crossing-a-multiple-of-10 check instead of % 10, so a double-kill
+	# jump like 9 -> 11 still earns the buff.
+	@warning_ignore("integer_division")
+	if kills / 10 > previous / 10:
+		kill_buff_earned.emit()
 
 func update_distance(player_x: float) -> void:
 	var d := int(max(0.0, player_x - START_X) / 10.0)
@@ -49,6 +59,9 @@ func reset() -> void:
 	coins = 0
 	kills = 0
 	game_over = false
+	coin_multiplier = 1
+	kill_multiplier = 1
+	world_speed_scale = 1.0
 	is_new_highscore = false
 	previous_best = get_highscore()
 	beaten_highscore_live = false

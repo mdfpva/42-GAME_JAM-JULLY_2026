@@ -22,7 +22,8 @@ func _ready() -> void:
 func _update_color() -> void:
 	$Sprite2D.modulate = Palette.get_color("moving_platform")
 
-func _physics_process(delta: float) -> void:
+func _physics_process(raw_delta: float) -> void:
+	var delta := raw_delta * Game.world_speed_scale
 	match pattern:
 		Pattern.HORIZONTAL:
 			offset = clamp(offset + direction * speed * delta, -travel_distance, travel_distance)
