@@ -12,6 +12,7 @@ const RAPID_FIRE_INTERVAL := 0.15
 const SUPER_JUMP_MULT := 1.5
 const DOUBLE_SPEED_MULT := 2.0
 const SLOW_MOTION_SCALE := 0.5
+const SQUASH_RECOVER_SPEED := 3.0
 const BULLET_SCENE := preload("res://scenes/Bullet.tscn")
 
 enum Buff { FLIGHT, INSTANT_KILL, COIN_MAGNET, RAPID_FIRE, SUPER_JUMP, SHIELD, SLOW_MOTION, DOUBLE_SPEED, DOUBLE_COINS, DOUBLE_KILLS }
@@ -47,14 +48,52 @@ var coyote_timer := 0.0
 var active_buff := -1 # -1 = none, otherwise a Buff enum value
 var buff_timer := 0.0
 var fire_timer := 0.0
+var facing := 1
+var squash := 1.0 # 1 = normal; <1 squashed on landing, >1 stretched on jump
+var was_on_floor := true
+var shake_strength := 0.0
+var speed_upgrade := 1.0
+var jump_upgrade := 1.0
+var buff_time_bonus := 0.0
+var trail: CPUParticles2D
 var rng := RandomNumberGenerator.new()
 
 func _ready() -> void:
 	add_to_group("player")
 	rng.randomize()
+	speed_upgrade = 1.0 + 0.10 * int(Game.upgrades.get("speed", 0))
+	jump_upgrade = 1.0 + 0.08 * int(Game.upgrades.get("jump", 0))
+	buff_time_bonus = 1.0 * int(Game.upgrades.get("buff", 0))
+	_make_trail()
 	_update_color()
 	Palette.palette_changed.connect(_update_color)
 	Game.kill_buff_earned.connect(_on_kill_buff_earned)
+
+func _make_trail() -> void:
+	trail = CPUParticles2D.new()
+	trail.amount = 24
+	trail.lifetime = 0.3
+	trail.local_coords = false
+	trail.texture = $Sprite2D.texture
+	trail.scale_amount_min = 0.15
+	trail.scale_amount_max = 0.25
+	trail.gravity = Vector2.ZERO
+	trail.initial_velocity_min = 10.0
+	trail.initial_velocity_max = 30.0
+	trail.spread = 180.0
+	add_child(trail)
+
+func add_shake(strength: float) -> void:
+	shake_strength = maxf(shake_strength, strength)
+
+func _update_fx(delta: float) -> void:
+	trail.emitting = absf(velocity.x) > 40.0 or active_buff == Buff.FLIGHT
+	trail.color = $Sprite2D.modulate
+	if shake_strength > 0.01:
+		$Camera2D.offset = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * shake_strength
+		shake_strength = maxf(shake_strength - 40.0 * delta, 0.0)
+	else:
+		$Camera2D.offset = Vector2.ZERO
 
 func _update_color() -> void:
 	if active_buff != -1:
@@ -69,6 +108,7 @@ func has_instant_kill() -> bool:
 func consume_shield() -> bool:
 	if active_buff != Buff.SHIELD:
 		return false
+	Game.break_combo()
 	_end_buff()
 	return true
 
@@ -76,7 +116,8 @@ func consume_shield() -> bool:
 # regardless of how many buffs exist (see Buff enum above).
 func _on_kill_buff_earned() -> void:
 	var buff: int = rng.randi_range(0, Buff.size() - 1)
-	activate_buff(buff, rng.randf_range(BUFF_MIN_DURATION, BUFF_MAX_DURATION))
+	activate_buff(buff, rng.randf_range(BUFF_MIN_DURATION, BUFF_MAX_DURATION) + buff_time_bonus)
+	Sfx.play("buff")
 
 func activate_buff(buff: int, duration: float) -> void:
 	_clear_buff_effects()
@@ -114,15 +155,19 @@ func _pull_coins(delta: float) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if Game.game_over:
 		return
-	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_X:
+	if event.is_action_pressed("shoot") and not event.is_echo():
 		shoot()
 
 func shoot() -> void:
 	var bullet: Area2D = BULLET_SCENE.instantiate()
-	var facing := 1 if $Sprite2D.scale.x > 0 else -1
 	bullet.direction = facing
 	bullet.global_position = global_position + Vector2(facing * 24, 0)
 	get_tree().current_scene.add_child(bullet)
+	Sfx.play("shoot", -12.0)
+
+func _update_sprite(delta: float) -> void:
+	squash = move_toward(squash, 1.0, SQUASH_RECOVER_SPEED * delta)
+	$Sprite2D.scale = Vector2(facing * 2.0 / sqrt(squash), 3.0 * squash)
 
 func _physics_process(delta: float) -> void:
 	if Game.game_over:
@@ -148,9 +193,12 @@ func _physics_process(delta: float) -> void:
 		velocity.x = vx * FLIGHT_SPEED
 		velocity.y = vy * FLIGHT_SPEED
 		if vx != 0:
-			$Sprite2D.scale.x = 2 if vx > 0 else -2
+			facing = 1 if vx > 0 else -1
 
 		move_and_slide()
+		was_on_floor = false
+		_update_sprite(delta)
+		_update_fx(delta)
 		Game.update_distance(global_position.x)
 		if global_position.y > 900:
 			Game.die()
@@ -163,18 +211,28 @@ func _physics_process(delta: float) -> void:
 		coyote_timer -= delta
 
 	if coyote_timer > 0.0 and Input.is_action_just_pressed("ui_accept"):
-		velocity.y = JUMP_VELOCITY * (SUPER_JUMP_MULT if active_buff == Buff.SUPER_JUMP else 1.0)
+		velocity.y = JUMP_VELOCITY * jump_upgrade * (SUPER_JUMP_MULT if active_buff == Buff.SUPER_JUMP else 1.0)
 		coyote_timer = 0.0
+		squash = 1.35
+		Sfx.play("jump", -8.0)
 
-	var run_speed := SPEED * (DOUBLE_SPEED_MULT if active_buff == Buff.DOUBLE_SPEED else 1.0)
+	var run_speed := SPEED * speed_upgrade * (DOUBLE_SPEED_MULT if active_buff == Buff.DOUBLE_SPEED else 1.0)
 	var direction := Input.get_axis("ui_left", "ui_right")
 	if direction != 0:
 		velocity.x = direction * run_speed
-		$Sprite2D.scale.x = 2 if direction > 0 else -2
+		facing = 1 if direction > 0 else -1
 	else:
 		velocity.x = move_toward(velocity.x, 0, SPEED)
 
 	move_and_slide()
+
+	if is_on_floor() and not was_on_floor:
+		squash = 0.62
+		Sfx.play("land", -16.0)
+		Fx.burst(global_position + Vector2(0, 22), Color(1, 1, 1, 0.6), 6, 70.0)
+	was_on_floor = is_on_floor()
+	_update_sprite(delta)
+	_update_fx(delta)
 
 	Game.update_distance(global_position.x)
 

@@ -11,4 +11,6 @@ func _update_color() -> void:
 func _on_body_entered(body: Node2D) -> void:
 	if body.is_in_group("player"):
 		Game.add_coin()
+		Sfx.play("coin", -10.0)
+		Fx.burst(global_position, $Sprite2D.modulate, 6, 90.0)
 		queue_free()
