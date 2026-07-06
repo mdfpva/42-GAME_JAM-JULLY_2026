@@ -36,6 +36,12 @@ const BossScene := preload("res://scenes/Boss.tscn")
 
 const BOSS_INTERVAL := 15000.0 # px (= 1500 m)
 const DIFFICULTY_RAMP_X := 20000.0 # px until max difficulty
+const BIOME_SIZE := 5000.0 # px (= 500 m) per biome
+const BIOME_NAMES := ["PLANÍCIE", "GELO", "CAVERNA", "NOITE"]
+const BIOME_CLEAR_COLORS := [Color(0.55, 0.8, 0.95), Color(0.75, 0.88, 0.98), Color(0.18, 0.17, 0.2), Color(0.1, 0.12, 0.25)]
+const BIOME_TINTS := [Color(1, 1, 1), Color(0.9, 0.97, 1.0), Color(0.6, 0.6, 0.65), Color(0.55, 0.6, 0.85)]
+const GHOST_INTERVAL := 0.05
+const GHOST_MAX_POINTS := 7200 # 6 min of recording
 
 @onready var player: CharacterBody2D = $Player
 @onready var stats_label: Label = $UI/StatsLabel
@@ -44,6 +50,8 @@ const DIFFICULTY_RAMP_X := 20000.0 # px until max difficulty
 @onready var daily_label: Label = $UI/DailyLabel
 @onready var pause_panel: Control = $UI/PausePanel
 @onready var pause_label: Label = $UI/PausePanel/Label
+@onready var achievements_panel: Control = $UI/AchievementsPanel
+@onready var achievements_label: Label = $UI/AchievementsPanel/Label
 @onready var controls_panel: Control = $UI/ControlsPanel
 @onready var game_over_panel: Control = $UI/GameOverPanel
 @onready var game_over_label: Label = $UI/GameOverPanel/Label
@@ -63,6 +71,12 @@ var side_trend_remaining := 0
 var gravity: float = ProjectSettings.get_setting("physics/2d/default_gravity")
 var current_difficulty := 0.0
 var next_boss_x := BOSS_INTERVAL
+var last_biome := 0
+var canvas_tint: CanvasModulate
+var run_time := 0.0
+var ghost_accum := 0.0
+var ghost_points: Array = []
+var ghost_sprite: Sprite2D
 
 func _ready() -> void:
 	if Game.daily_mode:
@@ -81,10 +95,19 @@ func _ready() -> void:
 	Game.pause_toggled.connect(_on_pause_toggled)
 	Game.meta_changed.connect(_refresh_pause_panel)
 	Palette.palette_changed.connect(_on_palette_changed)
+	Game.achievement_unlocked.connect(_on_achievement_unlocked)
 	daily_label.visible = Game.daily_mode
 	pause_panel.visible = false
+	achievements_panel.visible = false
 	get_tree().paused = false
+	Game.current_biome = Game.BIOME_NORMAL
+	canvas_tint = CanvasModulate.new()
+	canvas_tint.color = BIOME_TINTS[0]
+	add_child(canvas_tint)
+	RenderingServer.set_default_clear_color(BIOME_CLEAR_COLORS[0])
 	_build_parallax()
+	_setup_ghost()
+	_setup_touch_controls()
 	_on_stats_changed()
 	_update_missions_label()
 
@@ -92,12 +115,14 @@ func _ready() -> void:
 	while next_x < player.global_position.x + AHEAD_BUFFER * 2.0:
 		_spawn_next_chunk()
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if Game.game_over:
 		return
 	Game.decay_combo()
 	_update_buff_label()
 	_update_missions_label()
+	_update_biome()
+	_update_ghost(delta)
 	var intensity := 0.35 + 0.06 * (Game.combo - 1) + current_difficulty * 0.15
 	if player.active_buff != -1:
 		intensity += 0.3
@@ -105,6 +130,91 @@ func _process(_delta: float) -> void:
 	while next_x < player.global_position.x + AHEAD_BUFFER:
 		_spawn_next_chunk()
 	_despawn_behind(player.global_position.x - BEHIND_DESPAWN)
+
+func _update_biome() -> void:
+	var biome := int(maxf(player.global_position.x, 0.0) / BIOME_SIZE) % 4
+	Game.current_biome = biome
+	if biome == last_biome:
+		return
+	last_biome = biome
+	var tw := create_tween()
+	tw.tween_property(canvas_tint, "color", BIOME_TINTS[biome], 1.0)
+	RenderingServer.set_default_clear_color(BIOME_CLEAR_COLORS[biome])
+	_flash_banner("BIOMA: " + BIOME_NAMES[biome])
+
+func _setup_ghost() -> void:
+	if Game.ghost_data.get("points", []).is_empty():
+		return
+	ghost_sprite = Sprite2D.new()
+	ghost_sprite.texture = SQUARE_TEXTURE
+	ghost_sprite.scale = Vector2(2, 3)
+	ghost_sprite.modulate = Color(0.25, 0.25, 0.25, 0.35)
+	ghost_sprite.z_index = -1
+	add_child(ghost_sprite)
+
+# Records this run's path and replays the best run's ghost alongside it.
+func _update_ghost(delta: float) -> void:
+	run_time += delta
+	ghost_accum += delta
+	while ghost_accum >= GHOST_INTERVAL:
+		ghost_accum -= GHOST_INTERVAL
+		if ghost_points.size() < GHOST_MAX_POINTS:
+			ghost_points.append([player.global_position.x, player.global_position.y])
+	if ghost_sprite == null:
+		return
+	var pts: Array = Game.ghost_data.get("points", [])
+	var interval: float = Game.ghost_data.get("interval", GHOST_INTERVAL)
+	var fidx := run_time / interval
+	var i := int(fidx)
+	if i < pts.size() - 1:
+		var a: Array = pts[i]
+		var b: Array = pts[i + 1]
+		var f := fidx - i
+		ghost_sprite.position = Vector2(lerpf(a[0], b[0], f), lerpf(a[1], b[1], f))
+	elif not pts.is_empty():
+		var last: Array = pts[pts.size() - 1]
+		ghost_sprite.position = Vector2(last[0], last[1])
+
+func _on_achievement_unlocked(text: String) -> void:
+	_flash_banner("CONQUISTA: " + text)
+
+func _show_achievements() -> void:
+	var lines: Array[String] = ["CONQUISTAS", ""]
+	for id in Game.ACHIEVEMENTS.keys():
+		var mark := "[X] " if id in Game.achievements else "[  ] "
+		lines.append(mark + Game.ACHIEVEMENTS[id])
+	lines.append("")
+	lines.append("A - Fechar")
+	achievements_label.text = "\n".join(lines)
+	achievements_panel.visible = true
+
+func _setup_touch_controls() -> void:
+	if not DisplayServer.is_touchscreen_available():
+		return
+	var layer := CanvasLayer.new()
+	layer.layer = 50
+	add_child(layer)
+	var vp := get_viewport().get_visible_rect().size
+	_touch_btn(layer, "ui_left", "<", Vector2(90, vp.y - 110))
+	_touch_btn(layer, "ui_right", ">", Vector2(230, vp.y - 110))
+	_touch_btn(layer, "shoot", "X", Vector2(vp.x - 230, vp.y - 110))
+	_touch_btn(layer, "ui_accept", "^", Vector2(vp.x - 90, vp.y - 110))
+	_touch_btn(layer, "pause_game", "II", Vector2(vp.x - 60, 60), 0.5)
+
+func _touch_btn(layer: CanvasLayer, action: String, txt: String, center: Vector2, size_scale := 1.0) -> void:
+	var b := TouchScreenButton.new()
+	b.action = action
+	b.texture_normal = SQUARE_TEXTURE
+	b.scale = Vector2(6, 6) * size_scale
+	b.modulate = Color(0, 0, 0, 0.35)
+	b.position = center - Vector2(48, 48) * size_scale
+	layer.add_child(b)
+	var l := Label.new()
+	l.text = txt
+	l.add_theme_font_size_override("font_size", int(30 * size_scale))
+	l.add_theme_color_override("font_color", Color(1, 1, 1, 0.8))
+	l.position = center - Vector2(10, 20) * size_scale
+	layer.add_child(l)
 
 func _update_missions_label() -> void:
 	var lines: Array[String] = ["MISSÕES:"]
@@ -192,12 +302,17 @@ func _spawn_next_chunk() -> void:
 		var patrol: float = clamp(width * 0.35, 20.0, width * 0.5 - 20.0)
 		_add_enemy(start_x, width, new_top_y, patrol)
 
-	if not make_dynamic and not make_crumbling and width > 200.0 and rng.randf() < 0.22 + 0.13 * current_difficulty:
+	var gen_biome := int(next_x / BIOME_SIZE) % 4
+	var spike_chance := 0.22 + 0.13 * current_difficulty
+	if gen_biome == Game.BIOME_CAVE:
+		spike_chance += 0.12
+	if not make_dynamic and not make_crumbling and width > 200.0 and rng.randf() < spike_chance:
 		_add_spikes(start_x, width, new_top_y)
 
 	if start_x > next_boss_x:
 		next_boss_x += BOSS_INTERVAL
 		var boss := BossScene.instantiate()
+		boss.boss_type = rng.randi_range(0, 1)
 		boss.position = Vector2(start_x + width * 0.5, new_top_y - 140.0)
 		add_child(boss)
 		chunks.append(boss)
@@ -366,6 +481,18 @@ func _refresh_pause_panel() -> void:
 		var cost_txt := "MÁX" if cost < 0 else "custa %d" % cost
 		lines.append("%d - %s  [nível %d/3, %s]" % [i + 1, labels[i], lvl, cost_txt])
 	lines.append("")
+	lines.append("RASTOS:")
+	var trail_defs := [["fogo", "Fogo", 4], ["estrelas", "Estrelas", 5], ["arco", "Arco-Íris", 6]]
+	for t in trail_defs:
+		var status: String
+		if Game.equipped_trail == t[0]:
+			status = "EQUIPADO"
+		elif t[0] in Game.owned_trails:
+			status = "teu — carrega para equipar"
+		else:
+			status = "custa %d" % Game.TRAIL_COSTS[t[0]]
+		lines.append("%d - Rasto %s  [%s]" % [t[2], t[1], status])
+	lines.append("")
 	lines.append("(melhorias aplicam-se ao reiniciar: R)")
 	lines.append("P / Esc - Continuar")
 	pause_label.text = "\n".join(lines)
@@ -422,6 +549,8 @@ func _on_player_died() -> void:
 	Fx.burst(player.global_position, player.get_node("Sprite2D").modulate, 24, 260.0)
 	Fx.shake(10.0)
 	Music.set_intensity(0.15)
+	if Game.is_new_highscore:
+		Game.save_ghost(ghost_points, GHOST_INTERVAL)
 	highscore_banner.visible = false
 	var lines: Array[String] = ["GAME OVER"]
 
@@ -453,6 +582,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif event.keycode == KEY_D:
 			Game.daily_mode = not Game.daily_mode
 			get_tree().reload_current_scene()
+		elif event.keycode == KEY_A:
+			if achievements_panel.visible:
+				achievements_panel.visible = false
+			else:
+				_show_achievements()
 		elif event.keycode == KEY_C:
 			Game.clear_scores()
 			if game_over_panel.visible:

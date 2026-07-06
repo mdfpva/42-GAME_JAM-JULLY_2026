@@ -104,7 +104,7 @@ Espaço / Enter - Saltar
 X - Disparar
 P / Esc - Pausa e Loja
 R - Reiniciar   T - Recordes
-D - Modo Diário   C - Limpar Recordes
+A - Conquistas   D - Modo Diário
 
 Espinhos e plataformas que desabam
 são perigosos. Salta em cima dos
@@ -141,20 +141,41 @@ anchor_left = 0.5
 anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
-offset_left = -250.0
-offset_top = -200.0
-offset_right = 250.0
-offset_bottom = 200.0
+offset_left = -260.0
+offset_top = -245.0
+offset_right = 260.0
+offset_bottom = 245.0
 color = Color(0, 0, 0, 0.85)
 
 [node name="Label" type="Label" parent="UI/PausePanel"]
 offset_left = 24.0
 offset_top = 16.0
-offset_right = 476.0
-offset_bottom = 384.0
+offset_right = 496.0
+offset_bottom = 474.0
 theme_override_colors/font_color = Color(1, 1, 1, 1)
-theme_override_font_sizes/font_size = 20
+theme_override_font_sizes/font_size = 18
 text = "PAUSA"
+
+[node name="AchievementsPanel" type="ColorRect" parent="UI"]
+visible = false
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -280.0
+offset_top = -170.0
+offset_right = 280.0
+offset_bottom = 170.0
+color = Color(0, 0, 0, 0.85)
+
+[node name="Label" type="Label" parent="UI/AchievementsPanel"]
+offset_left = 28.0
+offset_top = 16.0
+offset_right = 532.0
+offset_bottom = 324.0
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 18
+text = "CONQUISTAS"
 
 [node name="GameOverPanel" type="ColorRect" parent="UI"]
 visible = false

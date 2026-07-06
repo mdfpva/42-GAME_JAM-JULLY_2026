@@ -3,6 +3,8 @@ extends CharacterBody2D
 const SPEED := 300.0
 const JUMP_VELOCITY := -540.0
 const COYOTE_TIME := 0.12
+const JUMP_BUFFER := 0.12
+const JUMP_CUT := 0.45 # releasing jump early keeps only this fraction of rise
 const FLIGHT_SPEED := 320.0
 const BUFF_MIN_DURATION := 4.0
 const BUFF_MAX_DURATION := 8.0
@@ -45,6 +47,7 @@ const BUFF_COLORS := {
 
 var gravity: float = ProjectSettings.get_setting("physics/2d/default_gravity")
 var coyote_timer := 0.0
+var jump_buffer_timer := 0.0
 var active_buff := -1 # -1 = none, otherwise a Buff enum value
 var buff_timer := 0.0
 var fire_timer := 0.0
@@ -88,7 +91,15 @@ func add_shake(strength: float) -> void:
 
 func _update_fx(delta: float) -> void:
 	trail.emitting = absf(velocity.x) > 40.0 or active_buff == Buff.FLIGHT
-	trail.color = $Sprite2D.modulate
+	match Game.equipped_trail:
+		"fogo":
+			trail.color = Color(1.0, randf_range(0.3, 0.6), 0.05)
+		"arco":
+			trail.color = Color.from_hsv(fmod(Time.get_ticks_msec() * 0.0004, 1.0), 0.85, 1.0)
+		"estrelas":
+			trail.color = Color(1.0, 1.0, 0.85)
+		_:
+			trail.color = $Sprite2D.modulate
 	if shake_strength > 0.01:
 		$Camera2D.offset = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * shake_strength
 		shake_strength = maxf(shake_strength - 40.0 * delta, 0.0)
@@ -210,17 +221,34 @@ func _physics_process(delta: float) -> void:
 		velocity.y += gravity * delta
 		coyote_timer -= delta
 
-	if coyote_timer > 0.0 and Input.is_action_just_pressed("ui_accept"):
+	# Jump buffering: a press slightly before landing still triggers the jump.
+	if Input.is_action_just_pressed("ui_accept"):
+		jump_buffer_timer = JUMP_BUFFER
+	else:
+		jump_buffer_timer -= delta
+
+	if coyote_timer > 0.0 and jump_buffer_timer > 0.0:
 		velocity.y = JUMP_VELOCITY * jump_upgrade * (SUPER_JUMP_MULT if active_buff == Buff.SUPER_JUMP else 1.0)
 		coyote_timer = 0.0
+		jump_buffer_timer = 0.0
 		squash = 1.35
 		Sfx.play("jump", -8.0)
 
+	# Variable jump: releasing early cuts the rise short.
+	if velocity.y < 0.0 and Input.is_action_just_released("ui_accept"):
+		velocity.y *= JUMP_CUT
+
 	var run_speed := SPEED * speed_upgrade * (DOUBLE_SPEED_MULT if active_buff == Buff.DOUBLE_SPEED else 1.0)
 	var direction := Input.get_axis("ui_left", "ui_right")
+	var on_ice := Game.current_biome == Game.BIOME_ICE
 	if direction != 0:
-		velocity.x = direction * run_speed
+		if on_ice:
+			velocity.x = move_toward(velocity.x, direction * run_speed, run_speed * 3.0 * delta)
+		else:
+			velocity.x = direction * run_speed
 		facing = 1 if direction > 0 else -1
+	elif on_ice:
+		velocity.x = move_toward(velocity.x, 0, run_speed * 1.5 * delta)
 	else:
 		velocity.x = move_toward(velocity.x, 0, SPEED)
 

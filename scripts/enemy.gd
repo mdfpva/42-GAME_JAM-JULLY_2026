@@ -95,6 +95,7 @@ func _on_body_entered(body: Node2D) -> void:
 			_die()
 		elif body.velocity.y > 0.0 and body.global_position.y < global_position.y - 15.0:
 			# Pisão: cair em cima do inimigo mata-o e o jogador ressalta.
+			Game.add_stomp()
 			_die()
 			body.velocity.y = -320.0
 		elif body.has_method("consume_shield") and body.consume_shield():
